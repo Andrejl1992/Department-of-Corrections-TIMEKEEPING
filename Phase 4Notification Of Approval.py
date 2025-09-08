@@ -30,7 +30,7 @@ def init_db():
                     staff_id INTEGER,
                     date TEXT,
                     shift INTEGER,
-                    status TEXT,
+                    status TEXT,       -- approved / denied / waitlist / canceled
                     waitlist_pos INTEGER
                 )''')
 
@@ -40,7 +40,7 @@ def init_db():
                     staff_id INTEGER,
                     date TEXT,
                     shift INTEGER,
-                    status TEXT
+                    status TEXT        -- scheduled / unavailable
                 )''')
 
     conn.commit()
@@ -54,7 +54,7 @@ def send_notification(email, subject, message):
     try:
         server = smtplib.SMTP("localhost")
         body = f"Subject: {subject}\n\n{message}"
-        server.sendmail("admin@nj.doc.gov", email, body)  # admin email updated
+        server.sendmail("admin@nj.doc.gov", email, body)
         server.quit()
         print(f"Notification sent to {email}: {subject}")
     except Exception as e:
@@ -73,10 +73,14 @@ def lockout_staff(staff_id, date, shift):
     conn.close()
 
 # -----------------------------
-# Webpage: Approve a PTO request
+# System: Approve request automatically
 # -----------------------------
-@app.route("/approve", methods=["GET", "POST"])
-def approve_request():
+@app.route("/system_approve", methods=["GET", "POST"])
+def system_approve():
+    """
+    This simulates the system auto-approving a request
+    (like in Phase 1/2 rules).
+    """
     message = ""
     if request.method == "POST":
         req_id = int(request.form["request_id"])
@@ -97,7 +101,7 @@ def approve_request():
             # Lock staff out of schedule
             lockout_staff(staff_id, date, shift)
 
-            # Get staff email and name
+            # Notify staff
             c.execute("SELECT email, name FROM staff WHERE id=?", (staff_id,))
             staff = c.fetchone()
             if staff:
@@ -109,20 +113,20 @@ def approve_request():
                 )
 
             conn.commit()
-            message = "Request approved. Staff notified and locked out of schedule."
+            message = "System approved request. Staff notified and locked out of schedule."
 
         conn.close()
 
-    return render_template_string(APPROVE_PAGE, message=message)
+    return render_template_string(SYSTEM_PAGE, message=message)
 
 # -----------------------------
 # HTML form for testing
 # -----------------------------
-APPROVE_PAGE = '''
-    <h2>Approve PTO (Phase 4)</h2>
+SYSTEM_PAGE = '''
+    <h2>System Auto-Approval (Phase 4)</h2>
     <form method="POST">
         Request ID: <input type="text" name="request_id"><br>
-        <input type="submit" value="Approve Request">
+        <input type="submit" value="Auto Approve">
     </form>
     <p>{{message}}</p>
 '''
