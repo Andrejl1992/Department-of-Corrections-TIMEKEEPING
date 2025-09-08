@@ -1,0 +1,119 @@
+from flask import Flask, request, render_template_string
+import sqlite3
+from datetime import datetime
+
+app = Flask(__name__)
+
+# -----------------------------
+# Setup: Create database tables
+# -----------------------------
+def init_db():
+    conn = sqlite3.connect("phase3.db")
+    c = conn.cursor()
+
+    # Staff table: officers with seniority and PTO balance
+    c.execute('''CREATE TABLE IF NOT EXISTS staff (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    badge_number TEXT,
+                    shift INTEGER,
+                    start_date TEXT,
+                    class_rank INTEGER,
+                    pto_balance INTEGER
+                )''')
+
+    # Requests table: stores PTO requests
+    c.execute('''CREATE TABLE IF NOT EXISTS requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    staff_id INTEGER,
+                    date TEXT,
+                    shift INTEGER,
+                    status TEXT,       -- approved / denied / waitlist / canceled
+                    waitlist_pos INTEGER
+                )''')
+
+    # Audit log: records all actions for accountability
+    c.execute('''CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    user_type TEXT,   -- staff / supervisor / system
+                    user_id INTEGER,
+                    action TEXT,      -- request_off / cancel_day / waitlist_upd
+                    outcome TEXT
+                )''')
+
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# Helper: Add entry to audit log
+# -----------------------------
+def log_action(user_type, user_id, action, outcome):
+    """Save an event in the audit log with timestamp."""
+    conn = sqlite3.connect("phase3.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO audit_log (timestamp, user_type, user_id, action, outcome) VALUES (?, ?, ?, ?, ?)",
+              (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_type, user_id, action, outcome))
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# Webpage: Cancel an approved request
+# -----------------------------
+@app.route("/cancel", methods=["GET", "POST"])
+def cancel_request():
+    message = ""
+    if request.method == "POST":
+        req_id = int(request.form["request_id"])
+        supervisor_id = int(request.form["supervisor_id"])  # tracks who approved the cancellation
+
+        conn = sqlite3.connect("phase3.db")
+        c = conn.cursor()
+
+        # Look up the request
+        c.execute("SELECT staff_id, date, shift, status FROM requests WHERE id=?", (req_id,))
+        req = c.fetchone()
+
+        if not req:
+            message = "Request not found."
+        elif req[3] != "approved":
+            message = "Only approved requests can be canceled."
+        else:
+            # Mark the request as canceled
+            c.execute("UPDATE requests SET status='canceled' WHERE id=?", (req_id,))
+            conn.commit()
+            log_action("supervisor", supervisor_id, "cancel_day", "approved")
+
+            # Promote first person on the waitlist (if any)
+            c.execute("""SELECT id, staff_id FROM requests
+                         WHERE date=? AND shift=? AND status='waitlist'
+                         ORDER BY waitlist_pos ASC LIMIT 1""", (req[1], req[2]))
+            next_wait = c.fetchone()
+
+            if next_wait:
+                c.execute("UPDATE requests SET status='approved', waitlist_pos=NULL WHERE id=?", (next_wait[0],))
+                conn.commit()
+                log_action("system", None, "waitlist_upd", f"promoted staff {next_wait[1]}")
+
+            message = "Cancellation approved. Waitlist updated if needed."
+
+        conn.close()
+
+    return render_template_string(CANCEL_PAGE, message=message)
+
+# -----------------------------
+# HTML form for testing
+# -----------------------------
+CANCEL_PAGE = '''
+    <h2>Cancel Approved PTO (Phase 3)</h2>
+    <form method="POST">
+        Request ID to Cancel: <input type="text" name="request_id"><br>
+        Supervisor ID: <input type="text" name="supervisor_id"><br>
+        <input type="submit" value="Submit Cancellation">
+    </form>
+    <p>{{message}}</p>
+'''
+
+if __name__ == "__main__":
+    init_db()
+    app.run(debug=True)
