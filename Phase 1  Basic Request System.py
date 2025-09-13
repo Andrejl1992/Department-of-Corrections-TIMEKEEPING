@@ -72,10 +72,10 @@ def request_timeoff():
 
             if balance <= 0:
                 status = "denied"
-                message = "Denied: not enough PTO."
+                message = "Denied: No Sick or Vacation Days Available."
             elif not slots_available(shift, date):
-                status = "denied"
-                message = "Denied: no open slots."
+                status = "Denied"
+                message = "Denied: This Day Is Maxed."
             else:
                 status = "approved"
                 message = "Approved!"
